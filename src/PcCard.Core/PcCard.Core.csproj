@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- 平台相关的普通库（DPAPI / schtasks / TCP 探测都在 Windows 上）。
+         ★ 刻意不引用 WindowsAppSDK —— 这样 pccard.exe（任务执行器）才能在
+           Session 0 的 SYSTEM 计划任务里运行；GUI 回退 WPF 时本库也能直接用。 -->
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RootNamespace>PcCard.Core</RootNamespace>
+    <AssemblyName>PcCard.Core</AssemblyName>
+    <Platforms>AnyCPU;x64</Platforms>
+  </PropertyGroup>
+
+</Project>

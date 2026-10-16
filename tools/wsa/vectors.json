@@ -1,0 +1,61 @@
+{
+  "_meta": {
+    "note": "合成 ssecurity/nonce，非真实凭据；由 make_vectors.py 生成",
+    "ssecurity": "AAECAwQFBgcICQoLDA0ODw==",
+    "nonce": "AAECAwQFBgcICQoL"
+  },
+  "sign_vectors": [
+    {
+      "uri": "/miotspec/prop/get",
+      "data_json": "{\"params\":[{\"did\":\"1234567890\",\"siid\":2,\"piid\":1}]}",
+      "signed_nonce": "Nz6YMO70n75ITJeXTWpiyXXLp6IBZ0yT0/hEJB0FDOg=",
+      "expected": {
+        "data": "Gjcp2tvQQivbG8/E8HqKAtVic7Vl3m7eJN4PRGSiPUphd4XvrveNmiEqSNifUG+YrJmf",
+        "rc4_hash__": "EUceyZ3ifA+BDu3uhWusI4EWFNEAtQ3YUIdcQA==",
+        "signature": "9PiAvfaM/NtK6mCEk3hX5QXvjYg="
+      }
+    },
+    {
+      "uri": "/miotspec/prop/set",
+      "data_json": "{\"params\":[{\"did\":\"1234567890\",\"siid\":2,\"piid\":1,\"value\":true}]}",
+      "signed_nonce": "Nz6YMO70n75ITJeXTWpiyXXLp6IBZ0yT0/hEJB0FDOg=",
+      "expected": {
+        "data": "Gjcp2tvQQivbG8/E8HqKAtVic7Vl3m7eJN4PRGSiPUphd4XvrveNmiEqSNifUG+Y/eaUwjb2B3/2vrelln9Brw==",
+        "rc4_hash__": "NHJq9Oj5FxGKZvHU5Vq5HLELOrcYgmuRQ9wDQA==",
+        "signature": "jkqRuNmM5E4Gzbn95Kle+FBLwpU="
+      }
+    },
+    {
+      "uri": "/miotspec/prop/set",
+      "data_json": "{\"params\":[{\"did\":\"1234567890\",\"siid\":2,\"piid\":1,\"value\":false}]}",
+      "signed_nonce": "Nz6YMO70n75ITJeXTWpiyXXLp6IBZ0yT0/hEJB0FDOg=",
+      "expected": {
+        "data": "Gjcp2tvQQivbG8/E8HqKAtVic7Vl3m7eJN4PRGSiPUphd4XvrveNmiEqSNifUG+Y/eaUwjb2B3/2rKS8gGdhj2Y=",
+        "rc4_hash__": "L2cw2urmfz+bRPiHoVS3Pr40Ha8T2mLeY6VYQA==",
+        "signature": "geloLHo9d0UUIc3eKtdQpwBsGD8="
+      }
+    },
+    {
+      "uri": "/home/device_list",
+      "data_json": "{\"getVirtualModel\":false,\"getHuamiDevices\":1}",
+      "signed_nonce": "Nz6YMO70n75ITJeXTWpiyXXLp6IBZ0yT0/hEJB0FDOg=",
+      "expected": {
+        "data": "Gjc+3t3nRiqNVPXTn3GHA5t6a+I2gSmOPstQGCDIZAl/d6ju+qTc03B4G4CG",
+        "rc4_hash__": "WFMy9fDfWW+sU/PntGaMMLp3A8c7pXG9Vr1yQA==",
+        "signature": "U77keMMsxnRNcrcMTy7iLssF8Rg="
+      }
+    }
+  ],
+  "decrypt_vectors": [
+    {
+      "kind": "plain",
+      "body_b64": "Gjc61M3UDWLJDbbNt22WCoN6a98szz6CdssNX2WyIlwnKNuztf2dmiEpSNifUG+b/eaSyjPnQGf95ueznGZ58CHCsHsOUfOsAlbNB1phrSFBXQ==",
+      "expected_json": "{\"code\":0,\"result\":[{\"did\":\"1234567890\",\"siid\":2,\"piid\":1,\"code\":0,\"value\":true}]}"
+    },
+    {
+      "kind": "gzip",
+      "body_b64": "fp5Ru5/m/TL73j/pmNCsL6LqY1QGxxDGPCQeLOYqR6LbMupZXRj1n5pza+ex9BNv92KERUwVZBf2gLxZSkL5mDTkK2fjg3SwiDZSqfDOklwKD827tUVofg==",
+      "expected_json": "{\"code\":0,\"result\":{\"list\":[{\"did\":\"1234567890\",\"name\":\"装机卡\"}]}}"
+    }
+  ]
+}

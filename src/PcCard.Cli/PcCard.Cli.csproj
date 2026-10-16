@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- WinExe：schtasks 触发时不闪控制台窗口；交互调试用 console 开关挂回父终端 -->
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <AssemblyName>pccard</AssemblyName>
+    <RootNamespace>PcCard.Cli</RootNamespace>
+    <Platforms>x64</Platforms>
+
+    <!-- ★ 刻意不引用 WindowsAppSDK：本 exe 要以 SYSTEM 身份在 Session 0 的
+         计划任务里运行，任何 WASDK 引导器都会在无桌面会话里炸掉。 -->
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishTrimmed>false</PublishTrimmed>
+    <PublishReadyToRun>false</PublishReadyToRun>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PcCard.Core\PcCard.Core.csproj" />
+  </ItemGroup>
+
+</Project>

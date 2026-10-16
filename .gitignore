@@ -1,0 +1,31 @@
+# ═══ 凭据与设备数据（绝不入库）═══
+tools/credential/credentials.json
+tools/credential/.auth-*.json
+tools/credential/login_qr*.png
+tools/wsa/devices.json
+tools/wsa/devices_local_test.json
+tools/wsa/raw/
+
+# ═══ 构建产物 ═══
+build/
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+
+# ═══ 图标生成产物（appicon.ico 保留：App csproj 构建需要）═══
+assets/_raw/
+assets/png/
+assets/preview.png
+assets/appicon-256.png
+
+# ═══ Python ═══
+__pycache__/
+*.pyc
+
+# ═══ 杂项 ═══
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+docs/todo-*.md

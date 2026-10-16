@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- 桌面窗口程序。★ 不叫 PcCard.exe —— 避免与同目录的 pccard.exe 命令大小写冲突 -->
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>PcCardApp</AssemblyName>
+    <RootNamespace>PcCard.App</RootNamespace>
+
+    <TargetFramework>net8.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>x64</Platforms>
+
+    <!-- 应用图标（同时作为托盘图标来源；Kimi 正式设计到位后替换 assets/appicon.ico） -->
+    <ApplicationIcon>..\..\assets\appicon.ico</ApplicationIcon>
+
+    <!-- 无包标识的普通 Win32 应用（绝不用 MSIX）+ 完全自包含（目标机零依赖） -->
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+
+    <UseWinUI>true</UseWinUI>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <PublishTrimmed>false</PublishTrimmed>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <DefaultLanguage>zh-CN</DefaultLanguage>
+
+    <!-- 自己的 Main：单实例互斥 + 激活转发 + selfcheck 早分派 -->
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+
+    <!-- 内存精打细算：目标机（阿里云）仅 ~600MB 空闲、无 GPU 走 WARP 软渲染 -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <GCConserveMemory>6</GCConserveMemory>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PcCard.Core\PcCard.Core.csproj" />
+  </ItemGroup>
+
+</Project>
