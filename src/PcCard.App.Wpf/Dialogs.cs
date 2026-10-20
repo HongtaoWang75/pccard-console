@@ -1,5 +1,7 @@
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Interop;
 using System.Windows.Media;
 using PcCard.Core.Devices;
 using PcCard.Core.Models;
@@ -11,6 +13,7 @@ public sealed class InfoDialog : Window
 {
     private InfoDialog(string title, string message)
     {
+        DarkTitleBar.Attach(this);
         Title = title;
         Width = 420;
         SizeToContent = SizeToContent.Height;
@@ -56,6 +59,7 @@ public sealed class ConfirmDialog : Window
 
     private ConfirmDialog(string title, string message, string okText)
     {
+        DarkTitleBar.Attach(this);
         Title = title;
         Width = 440;
         SizeToContent = SizeToContent.Height;
@@ -121,6 +125,7 @@ public sealed class SettingsDialog : Window
     public SettingsDialog(string deviceName, ComputerPowerCard.CardSwitchState state,
         Func<ComputerPowerCard.CardSwitch, bool, Task> writer)
     {
+        DarkTitleBar.Attach(this);
         _writer = writer;
         Title = $"设备设置 · {deviceName}";
         Width = 460;
@@ -129,7 +134,9 @@ public sealed class SettingsDialog : Window
         ResizeMode = ResizeMode.NoResize;
         Background = (Brush)Application.Current.Resources["PcSurface"];
 
-        var panel = new StackPanel { Margin = new Thickness(18), Width = 420 };
+        // 不设固定宽度：窗口 460 - 边框 - 左右各 18 边距 ≈ 408 可用，
+        // 之前写死 420 会让最右侧的勾选框超出客户区被裁掉一半。
+        var panel = new StackPanel { Margin = new Thickness(18) };
         _status = new TextBlock
         {
             FontSize = 12,
@@ -247,6 +254,7 @@ public sealed class AddTaskDialog : Window
 
     public AddTaskDialog()
     {
+        DarkTitleBar.Attach(this);
         Title = "新增定时任务";
         Width = 440;
         SizeToContent = SizeToContent.Height;
@@ -276,7 +284,12 @@ public sealed class AddTaskDialog : Window
             FontSize = 12,
             Foreground = (Brush)Application.Current.Resources["PcTextSecondary"],
         });
-        _actionBox = new ComboBox { SelectedIndex = 0, Margin = new Thickness(0, 4, 0, 8) };
+        _actionBox = new ComboBox
+        {
+            SelectedIndex = 0,
+            Margin = new Thickness(0, 4, 0, 8),
+            Style = (Style)Application.Current.Resources["PcComboBox"],
+        };
         _actionBox.Items.Add("开机");
         _actionBox.Items.Add("关机");
         _actionBox.Items.Add("重启");
@@ -299,7 +312,12 @@ public sealed class AddTaskDialog : Window
             FontSize = 12,
             Foreground = (Brush)Application.Current.Resources["PcTextSecondary"],
         });
-        _triggerBox = new ComboBox { SelectedIndex = 0, Margin = new Thickness(0, 4, 0, 8) };
+        _triggerBox = new ComboBox
+        {
+            SelectedIndex = 0,
+            Margin = new Thickness(0, 4, 0, 8),
+            Style = (Style)Application.Current.Resources["PcComboBox"],
+        };
         _triggerBox.Items.Add("每天");
         _triggerBox.Items.Add("每周");
         _triggerBox.Items.Add("单次");
@@ -406,4 +424,29 @@ internal static class UiBrushes
 {
     public static Brush WhiteBrush()
         => (Brush)Application.Current.Resources["PcTextPrimary"];
+}
+
+/// <summary>给独立 Window（对话框）应用 Win10/11 深色标题栏。</summary>
+internal static class DarkTitleBar
+{
+    [DllImport("dwmapi.dll", PreserveSig = true)]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+
+    public static void Attach(Window window)
+    {
+        window.SourceInitialized += (_, _) =>
+        {
+            try
+            {
+                var hwnd = new WindowInteropHelper(window).Handle;
+                int on = 1;
+                if (DwmSetWindowAttribute(hwnd, 20, ref on, sizeof(int)) != 0)
+                    DwmSetWindowAttribute(hwnd, 19, ref on, sizeof(int));
+            }
+            catch
+            {
+                // 非关键：旧系统不支持时保持默认标题栏
+            }
+        };
+    }
 }

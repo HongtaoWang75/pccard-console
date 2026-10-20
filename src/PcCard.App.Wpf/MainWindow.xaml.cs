@@ -58,6 +58,7 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
         Title = "开机卡控制台";
         VersionText.Text = $"PcCard v{AppPaths.Version}";
+        SourceInitialized += (_, _) => ApplyDarkTitleBar();
         if (renderOnly) return;
 
         if (!IsElevated())
@@ -85,6 +86,26 @@ public sealed partial class MainWindow : Window
     {
     }
 
+    // ── Win10/11 深色标题栏：WPF 不会自动跟随深色主题 ────────────────
+    [DllImport("dwmapi.dll", PreserveSig = true)]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+
+    private void ApplyDarkTitleBar()
+    {
+        try
+        {
+            var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+            int on = 1;
+            // Win10 2004+ 用属性 20；1903-1909 用 19。先试 20，失败再试 19。
+            if (DwmSetWindowAttribute(hwnd, 20, ref on, sizeof(int)) != 0)
+                DwmSetWindowAttribute(hwnd, 19, ref on, sizeof(int));
+        }
+        catch
+        {
+            // 非关键：个别系统不支持该属性时保持默认标题栏
+        }
+    }
+
     /// <summary>把实时窗口的可视状态复制到截图克隆（文本/颜色/可见性/使能/列表数据源）。</summary>
     internal void CopyVisualStateFrom(MainWindow src)
     {
@@ -109,6 +130,7 @@ public sealed partial class MainWindow : Window
         BusyRing.Visibility = src.BusyRing.Visibility;
         TasksList.ItemsSource = src.TasksList.ItemsSource;
         LogsList.ItemsSource = src.LogsList.ItemsSource;
+        LogsHeader.Text = src.LogsHeader.Text;
         TasksEmptyText.Visibility = src.TasksEmptyText.Visibility;
         LogsEmptyText.Visibility = src.LogsEmptyText.Visibility;
     }
@@ -437,6 +459,7 @@ public sealed partial class MainWindow : Window
                 OperationLog.Append(new OperationEntry
                 {
                     Source = "gui",
+                    DeviceName = dev.DisplayName,
                     Action = kind.ToWireName(),
                     Did = dev.Did,
                     Ok = true,
@@ -454,6 +477,7 @@ public sealed partial class MainWindow : Window
                 OperationLog.Append(new OperationEntry
                 {
                     Source = "gui",
+                    DeviceName = dev.DisplayName,
                     Action = kind.ToWireName(),
                     Did = dev.Did,
                     Ok = false,
@@ -603,9 +627,27 @@ public sealed partial class MainWindow : Window
     private void LoadLogs()
     {
         _logs.Clear();
-        foreach (var entry in OperationLog.ReadRecent(100))
-            _logs.Add(new LogItemVm(entry));
+
+        var dev = ConfigStore.GetSelectedDevice();
+
+        // Did → 显示名（给 2026-10-20 之前没有 DeviceName 的旧日志回填）
+        var names = new Dictionary<string, string>();
+        foreach (var d in ConfigStore.LoadDevices()?.Devices ?? new List<DeviceRecord>())
+            if (!string.IsNullOrEmpty(d.Did))
+                names[d.Did] = d.DisplayName;
+
+        // 日志只显示「当前选中设备」的操作记录；切换设备时 RefreshAsync 会重跑本方法
+        foreach (var entry in OperationLog.ReadRecent(500))
+        {
+            if (_logs.Count >= 100) break;
+            if (dev is not null && entry.Did != dev.Did) continue;
+            _logs.Add(new LogItemVm(entry, names));
+        }
+
         LogsEmptyText.Visibility = _logs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        LogsHeader.Text = dev is null
+            ? "操作日志"
+            : $"操作日志 · {LogItemVm.ShortDeviceName(dev.DisplayName)}";
     }
 
     private void OnRefreshClick(object sender, RoutedEventArgs e) => SafeRun("刷新", () => RefreshAsync(manual: true));
@@ -656,6 +698,7 @@ public sealed partial class MainWindow : Window
                     OperationLog.Append(new OperationEntry
                     {
                         Source = "gui",
+                        DeviceName = dev.DisplayName,
                         Action = $"switch:{kind}",
                         Did = dev.Did,
                         Ok = true,
@@ -923,20 +966,37 @@ public sealed class TaskItemVm : INotifyPropertyChanged
 
 public sealed class LogItemVm
 {
-    public LogItemVm(OperationEntry e)
+    public LogItemVm(OperationEntry e, IReadOnlyDictionary<string, string>? deviceNames = null)
     {
         TimeFull = e.Time.Replace('T', ' ');
         SourceLabel = e.Source.StartsWith("task:", StringComparison.Ordinal) ? "定时" : "手动";
+
+        // 设备名：新日志直接有；旧日志按 Did 从当前设备清单回填；再不行显示 did
+        DeviceFull = !string.IsNullOrWhiteSpace(e.DeviceName)
+            ? e.DeviceName!
+            : (deviceNames is not null && deviceNames.TryGetValue(e.Did, out var n)
+                ? n
+                : (string.IsNullOrEmpty(e.Did) ? "—" : $"did:{e.Did}"));
+        DeviceLabel = ShortDeviceName(DeviceFull);
+
         ActionText = WireToChinese(e.Action);
         Ok = e.Ok;
         ErrorText = e.Message ?? "";
     }
 
     public string TimeFull { get; }
+    public string DeviceLabel { get; }
+    public string DeviceFull { get; }
     public string SourceLabel { get; }
     public string ActionText { get; }
     public bool Ok { get; }
     public string ErrorText { get; }
+
+    /// <summary>列宽有限，去掉统一后缀「的电脑开机卡」，只留机器名。</summary>
+    public static string ShortDeviceName(string name)
+        => name.EndsWith("的电脑开机卡", StringComparison.Ordinal)
+            ? name[..^"的电脑开机卡".Length]
+            : name;
 
     public string ResultText => Ok
         ? "成功"

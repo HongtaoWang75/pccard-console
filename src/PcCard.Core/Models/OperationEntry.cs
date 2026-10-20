@@ -11,6 +11,9 @@ public sealed class OperationEntry
     /// <summary>gui / cli / task:&lt;名称&gt;。</summary>
     public string Source { get; set; } = "";
 
+    /// <summary>设备显示名（2026-10-20 起记录；更早的日志为空，读取时按 Did 回填）。</summary>
+    public string? DeviceName { get; set; }
+
     public string Action { get; set; } = "";
     public string Did { get; set; } = "";
     public bool Ok { get; set; }

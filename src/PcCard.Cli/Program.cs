@@ -343,6 +343,7 @@ public static class Program
                 OperationLog.Append(new OperationEntry
                 {
                     Source = "cli",
+                    DeviceName = dev.DisplayName,
                     Action = kind.ToWireName(),
                     Did = dev.Did,
                     Ok = ok,
@@ -533,9 +534,13 @@ public static class Program
             Log.Error($"task run failed: {task.Id}", ex);
         }
 
+        var taskDeviceName = ConfigStore.LoadDevices()?.Devices
+            .FirstOrDefault(d => d.Did == task.DeviceDid)?.DisplayName;
+
         OperationLog.Append(new OperationEntry
         {
             Source = $"task:{task.Name}",
+            DeviceName = taskDeviceName,
             Action = task.Action.ToWireName(),
             Did = task.DeviceDid,
             Ok = ok,

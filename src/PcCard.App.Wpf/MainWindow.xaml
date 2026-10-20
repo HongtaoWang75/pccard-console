@@ -60,10 +60,9 @@
                     </StackPanel>
 
                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                        <ComboBox x:Name="DeviceCombo" Width="224" Height="32" FontSize="13"
+                        <ComboBox x:Name="DeviceCombo" Style="{StaticResource PcComboBox}"
+                                  Width="224" Height="32" FontSize="13"
                                   VerticalContentAlignment="Center"
-                                  Background="{StaticResource PcSurface2}"
-                                  Foreground="White" BorderBrush="{StaticResource PcBorder}"
                                   SelectionChanged="OnDeviceChanged" />
                         <Button x:Name="RefreshBtn" Style="{StaticResource PcIconButton}" Margin="8,0,0,0"
                                 Click="OnRefreshClick" ToolTip="刷新状态" Content="&#xE72C;" />
@@ -191,7 +190,7 @@
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <TextBlock Text="操作日志" FontSize="14" FontWeight="SemiBold"
+                <TextBlock x:Name="LogsHeader" Text="操作日志" FontSize="14" FontWeight="SemiBold"
                            Foreground="{StaticResource PcTextPrimary}" />
 
                 <Grid Grid.Row="1" Margin="0,4,0,0">
