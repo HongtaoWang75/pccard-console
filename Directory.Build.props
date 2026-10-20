@@ -11,7 +11,7 @@
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
 
-    <Version>0.1.1</Version>
+    <Version>0.1.2</Version>
     <Company>Wang Hongtao</Company>
     <Product>PcCard</Product>
     <Copyright>Copyright © 2026 Wang Hongtao</Copyright>

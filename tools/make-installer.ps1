@@ -39,9 +39,9 @@ if (-not $SkipBuild) {
 
 # ── 2) 产物完整性校验 ──
 $required = @{
-    'PcCardApp.exe'                       = '图形界面 + 托盘'
+    'PcCardApp.exe'                       = '图形界面 + 托盘（WPF）'
     'pccard.exe'                          = '任务执行器 / CLI'
-    'Microsoft.WindowsAppRuntime.dll'     = 'WASDK 自包含运行时'
+    'PresentationFramework.dll'           = 'WPF 运行时'
     'System.Private.CoreLib.dll'          = '.NET 自包含运行时'
 }
 $missing = @()

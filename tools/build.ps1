@@ -50,7 +50,8 @@ $srcDir    = Join-Path $repoRoot 'src'
 $projects = @(
     @{ Name = 'PcCard.Core'; Path = Join-Path $srcDir 'PcCard.Core\PcCard.Core.csproj' }
     @{ Name = 'PcCard.Cli';  Path = Join-Path $srcDir 'PcCard.Cli\PcCard.Cli.csproj' }
-    @{ Name = 'PcCard.App';  Path = Join-Path $srcDir 'PcCard.App\PcCard.App.csproj' }
+    # ★ App 层改用 WPF：WinUI 3 在 RDP 会话重连时必然 fail-fast 崩溃（见 runbook）
+    @{ Name = 'PcCard.App.Wpf'; Path = Join-Path $srcDir 'PcCard.App.Wpf\PcCard.App.Wpf.csproj' }
     @{ Name = 'PcCard.Core.Tests'; Path = Join-Path $repoRoot 'tests\PcCard.Core.Tests\PcCard.Core.Tests.csproj' }
 )
 
@@ -116,7 +117,7 @@ if (Test-Path $stageDir) { Remove-Item $stageDir -Recurse -Force }
 New-Item -ItemType Directory -Force $stageDir | Out-Null
 
 Write-Host "`n汇集到 $stageDir ..." -ForegroundColor Cyan
-foreach ($name in 'PcCard.Cli', 'PcCard.App') {   # Cli 先发（App 会覆盖共享文件，多出的 WASDK 文件保留）
+foreach ($name in 'PcCard.Cli', 'PcCard.App.Wpf') {   # Cli 先发（App 会覆盖共享文件）
     $proj = ($projects | Where-Object { $_.Name -eq $name }).Path
     & $dotnetExe publish $proj -c $Configuration -r win-x64 --self-contained true -o $stageDir --nologo 2>&1 |
         Where-Object { $_ -match 'error' } | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
@@ -130,10 +131,15 @@ foreach ($name in 'PcCard.Cli', 'PcCard.App') {   # Cli 先发（App 会覆盖�
 if ($LASTEXITCODE -ne 0) { Write-Host '依赖门禁未通过' -ForegroundColor Red; exit 1 }
 
 # ── 产物校验 ──
-$expect = 'PcCardApp.exe', 'pccard.exe', 'Microsoft.WindowsAppRuntime.dll'
+$expect = 'PcCardApp.exe', 'pccard.exe'
 $fail = @()
 foreach ($f in $expect) {
     if (-not (Test-Path (Join-Path $stageDir $f))) { $fail += "$f 未生成" }
+}
+# ★ 回归门禁：stage 里不允许出现 WinUI/WASDK —— App 层已换 WPF，
+#   WinUI 3 在 RDP 重连时会 fail-fast 崩溃（见 docs/runbook-aliyun.md）
+foreach ($f in 'Microsoft.UI.Xaml.dll', 'Microsoft.WindowsAppRuntime.dll') {
+    if (Test-Path (Join-Path $stageDir $f)) { $fail += "$f 混入 stage —— App 层应为 WPF 构建" }
 }
 if (Test-Path (Join-Path $stageDir 'runtimes')) { $fail += 'runtimes\ 子目录存在 —— RuntimeIdentifier 没生效' }
 

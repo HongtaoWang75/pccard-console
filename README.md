@@ -2,7 +2,11 @@
 
 在阿里云（Windows Server）上常驻的「米家电脑开机卡」控制台：**RDP 到任何地方都能给家里电脑开关机**。
 
-- 形态：**未打包的 WinUI 3 应用**（`WindowsPackageType=None`，自包含），发布为 **exe 安装器**（Inno Setup，绝不用 MSIX）
+- 形态：**WPF 应用**（.NET 8，自包含），发布为 **exe 安装器**（Inno Setup，绝不用 MSIX）
+  - ⚠️ v0.1.2 起 App 层从 WinUI 3 切换为 WPF：WinUI 3 在当前 WindowsAppSDK 下
+    **RDP 会话重连时必然 fail-fast 崩溃**（`Microsoft.UI.Xaml.dll` +0x3a9dbd，
+    `0xC000027B/E_UNEXPECTED`，WER 自 v1 起 8+ 次、与每次 RDP 重连精确对应）。
+    WinUI 实现保留在 `src/PcCard.App/` 作档案，不再构建。
 - 控制通道：直连小米云 `api.io.mi.com`（ENCRYPT-RC4 签名），设备 = PZG 开机卡（Basic 档）
 - 操作：开机 / 关机 / **重启** + **强制勾选**（关机→强制关机、重启→强制重启，写 `piid5=3/2`）——后两者官方插件对 Basic 档隐藏，按用户要求开放，属**实验性**，云端不支持时会明确报错
 - 设备设置（⚙）：**童锁**（锁机箱物理电源键）/ **指示灯** / **通电自动开机**（停电恢复自动开机）——原 App 设置页功能，协议层全支持（实测通过）
@@ -14,7 +18,8 @@
 ```
 src/PcCard.Core/       UI 无关核心（云客户端/设备语义/DPAPI 凭据库/任务存储/schtasks 封装）
 src/PcCard.Cli/        pccard.exe（doctor / status / power / task run …）
-src/PcCard.App/        WinUI 3 界面 + 托盘 + --selfcheck 自渲染截图
+src/PcCard.App.Wpf/    WPF 界面 + 托盘 + --selfcheck 自渲染截图（v0.1.2 起）
+src/PcCard.App/        WinUI 3 旧实现（RDP 重连崩溃，仅存档不构建）
 tests/                 跨语言签名向量 + 任务 XML 单测
 tools/wsa/             设备提取 / 云冒烟 / 向量生成（python）
 tools/credential/      扫码获取云凭据（python + venv-mijia）

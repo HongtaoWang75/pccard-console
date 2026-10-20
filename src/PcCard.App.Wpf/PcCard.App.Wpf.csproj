@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    PcCard 的 WPF 实现（取代 WinUI：WinUI 3 在当前 WindowsAppSDK 版本下
+    于 RDP 会话重连时必然 fail-fast 崩溃 —— Microsoft.UI.Xaml.dll +0x3a9dbd，
+    见 docs/runbook-aliyun.md 与 WER 记录。WPF 在 RDP 下稳定成熟。）
+
+    ★ 程序集名保持 PcCardApp.exe：安装器/托盘计划任务/看门狗都按此名工作。
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>PcCardApp</AssemblyName>
+    <RootNamespace>PcCard.AppWpf</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationIcon>..\..\assets\appicon.ico</ApplicationIcon>
+    <SelfContained>true</SelfContained>
+    <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PcCard.Core\PcCard.Core.csproj" />
+  </ItemGroup>
+
+  <!-- 移除 WinForms 隐式 using：避免 Brush/TextBox/ComboBox/Application 等与 WPF 撞名 -->
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+</Project>

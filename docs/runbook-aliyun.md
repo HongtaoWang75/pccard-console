@@ -65,6 +65,24 @@ ssh ali 'schtasks /Delete /TN "PcCard\SelfCheck" /F'
 | 定时任务没触发 | `schtasks /Query /TN "PcCard\Task_<id>" /V` 看 Last Run Result；`pccard.exe task list` 看 tasks.json 侧 |
 | 安装器报错 | 日志 `C:\Windows\Temp\pccard-install.log`（[Code] 段的 schtasks 操作都有 Log 记录） |
 
+## 2026-10-20 v0.1.2：WinUI → WPF（RDP 重连崩溃根治）
+
+- **现象**：GUI 在 RDP 使用过程中随机「卡死/闪退」；WER 记录自 v1 起 8+ 次崩溃，
+  全部 `0xC000027B`（stowed）+ `E_UNEXPECTED`，故障模块 `Microsoft.UI.Xaml.dll`
+  **偏移恒定 0x3a9dbd**。与 RDP 会话重连事件逐条对表：几乎每次崩溃都在
+  `LocalSessionManager` 的 reconnection（原因码 5）后 7–40 秒内发生。
+- **结论**：这是 WinUI 3 / WindowsAppSDK 在 RDP 会话重连时的 fail-fast 回归，
+  应用代码无法拦截（RO 层 fast-fail 绕过托管 catch；对话框链加固后仍复现）。
+  WinAppSDK 有社区的 RDP 卡死回归报告，无可用 workaround。
+- **处置**：App 层改写为 **WPF**（`src/PcCard.App.Wpf`，功能对齐，Core/CLI/任务/凭据全复用），
+  v0.1.2 部署。`build.ps1` 增加门禁：stage 出现 `Microsoft.UI.Xaml.dll`/`Microsoft.WindowsAppRuntime.dll`
+  直接失败。WinUI 旧代码留档在 `src/PcCard.App/`。
+- **自检注意**：.NET 8 WPF 的 `RenderTargetBitmap` 在**断开/锁屏会话**里会返回空图
+  （同机 .NET Framework WPF 正常）——所以 `--selfcheck` 的 PNG 可能全白，但
+  sidecar 文本（state/footer/session/rtbProbe）仍可靠；要截真图请在**会话已连接**时跑自检。
+- **看门狗**：`PcCard\Watchdog`（SYSTEM，每 5 分钟）——PcCardApp 不在就拉起 `PcCard\Tray`，
+  作为最终保险（任何原因导致的进程消失都会在 5 分钟内恢复）。
+
 ## 卸载
 
 ```powershell
