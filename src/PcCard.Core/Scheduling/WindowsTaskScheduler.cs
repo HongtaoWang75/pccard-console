@@ -67,9 +67,17 @@ public static class WindowsTaskScheduler
                 StandardErrorEncoding = Encoding.UTF8,
             };
             using var p = Process.Start(psi)!;
-            var stdout = p.StandardOutput.ReadToEnd();
-            var stderr = p.StandardError.ReadToEnd();
-            p.WaitForExit(30_000);
+            // ★ 并行读两个流再等待退出：旧写法「先 ReadToEnd(stdout) 再 WaitForExit」在
+            //   stderr 写满管道缓冲时会死锁（GUI 上表现为整个窗口「未响应」）。
+            var stdoutTask = p.StandardOutput.ReadToEndAsync();
+            var stderrTask = p.StandardError.ReadToEndAsync();
+            if (!p.WaitForExit(10_000))
+            {
+                try { p.Kill(entireProcessTree: true); } catch { /* 尽力而为 */ }
+                return (false, "schtasks 超时（10s）");
+            }
+            var stdout = stdoutTask.GetAwaiter().GetResult();
+            var stderr = stderrTask.GetAwaiter().GetResult();
             var message = string.IsNullOrWhiteSpace(stderr) ? stdout.Trim() : stderr.Trim();
             return (p.ExitCode == 0, message);
         }

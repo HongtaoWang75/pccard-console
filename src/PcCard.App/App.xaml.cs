@@ -23,6 +23,8 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        InstallCrashHandlers();
+
         MainWindow = new MainWindow();
         if (!Startup.StartHidden)
             MainWindow.Activate();
@@ -39,6 +41,57 @@ public partial class App : Application
 
         if (Startup.SelfCheck)
             _ = RunSelfCheckAsync();
+        else if (Startup.ReproDialog)
+            _ = RunReproAsync();
+    }
+
+    /// <summary>
+    /// 全局异常兜底：任何漏网异常（async void / XAML 事件 / 未观察任务）先落日志、尽力续命。
+    /// 注：XAML 的 stowed fail-fast（0xc000027b）是 RO 层 fast-fail、托管层拦不住 ——
+    /// 终局要靠不触发它；这里保证「托管异常」一律有据可查。
+    /// </summary>
+    private void InstallCrashHandlers()
+    {
+        UnhandledException += (_, e) =>
+        {
+            Log.Error("Application.UnhandledException", e.Exception);
+            e.Handled = true; // 尽力续命
+        };
+
+        // 注：WinUI3 的 DispatcherQueue 没有 UnhandledException 事件（那是 UWP CoreDispatcher 的 API），
+        // 所以 async void 的兜底由 MainWindow.SafeRun 统一包装承担。
+
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            if (e.ExceptionObject is Exception ex)
+                Log.Error("AppDomain.UnhandledException", ex);
+            else
+                Log.Error($"AppDomain.UnhandledException: {e.ExceptionObject}");
+        };
+
+        TaskScheduler.UnobservedTaskException += (_, e) =>
+        {
+            Log.Error("UnobservedTaskException", e.Exception);
+            e.SetObserved();
+        };
+    }
+
+    /// <summary>--repro-dialog：复现「对话框收尾期连弹」的崩溃机制（raw）或验证串行器（host）。</summary>
+    private async Task RunReproAsync()
+    {
+        string text;
+        try
+        {
+            text = await MainWindow!.RunReproDialogAsync(Startup.ReproRaw);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("repro failed", ex);
+            text = "REPRO-FAIL: " + ex;
+        }
+        Console.WriteLine(text);
+        WriteSidecar(Startup.PngPath, text);
+        ExitApp();
     }
 
     /// <summary>--selfcheck：自渲染截图 + 诊断落盘/落 stdout，默认跑完即退。</summary>

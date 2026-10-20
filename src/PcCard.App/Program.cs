@@ -24,7 +24,7 @@ public static class Program
         {
             // ★ --selfcheck 刻意跳过单实例检查：以独立的短命实例运行（自己开窗、
             //   自己截图、自己退出），完全不打扰可能正在托盘常驻的正式实例。
-            if (!startup.SelfCheck && !instance.Acquire())
+            if (!startup.SelfCheck && !startup.ReproDialog && !instance.Acquire())
             {
                 var delivered = GuiInstance.Forward(startup.ToActivationMessage(), TimeSpan.FromSeconds(3));
                 log.Info(delivered ? "激活参数已转发给现有实例，本进程退出" : "转发失败（旧实例可能僵死），改为自行开窗");

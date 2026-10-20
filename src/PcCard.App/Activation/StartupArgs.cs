@@ -18,6 +18,12 @@ public sealed class StartupArgs
     /// <summary>--timeout &lt;sec&gt;：自检等待数据/布局的最长秒数。</summary>
     public int TimeoutSec { get; init; } = 20;
 
+    /// <summary>--repro-dialog：对话框连弹崩溃复现（--repro-dialog-raw 为旧写法的对照实验）。</summary>
+    public bool ReproDialog { get; init; }
+
+    /// <summary>--repro-dialog-raw：不用 DialogHost，直接复刻线上崩溃时序。</summary>
+    public bool ReproRaw { get; init; }
+
     public static StartupArgs Parse(string[] args)
     {
         return new StartupArgs
@@ -25,6 +31,8 @@ public sealed class StartupArgs
             StartHidden = args.Contains("--tray"),
             SelfCheck = args.Contains("--selfcheck"),
             Stay = args.Contains("--stay"),
+            ReproDialog = args.Contains("--repro-dialog") || args.Contains("--repro-dialog-raw"),
+            ReproRaw = args.Contains("--repro-dialog-raw"),
             PngPath = GetOpt(args, "--png"),
             TimeoutSec = GetOpt(args, "--timeout") is { } t && int.TryParse(t, out var v) && v > 0 ? v : 20,
         };

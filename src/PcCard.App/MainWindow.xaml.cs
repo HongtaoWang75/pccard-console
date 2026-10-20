@@ -46,6 +46,10 @@ public sealed partial class MainWindow : Window
     private bool _loadingDevices;
     private string? _lastDeviceType;
 
+    // ── 防崩/防假死基础设施 ──
+    private readonly SemaphoreSlim _dialogGate = new(1, 1); // 对话框串行器（WinUI3 同根只许一个 ContentDialog）
+    private bool _actionInFlight;                            // 动作请求在途（点击瞬间置位，防连按 piid1）
+
     // 三个主操作键的可用性（规范 §4：当前可执行的那个才可用）
     private bool _canOn = true;
     private bool _canOff = true;
@@ -74,7 +78,7 @@ public sealed partial class MainWindow : Window
         LogsList.ItemsSource = _logs;
 
         _timer.Interval = TimeSpan.FromSeconds(20);
-        _timer.Tick += (_, _) => _ = RefreshAsync();
+        _timer.Tick += (_, _) => SafeRun("定时刷新", () => RefreshAsync());
         _timer.Start();
 
         VersionText.Text = $"PcCard v{AppPaths.Version}";
@@ -117,7 +121,8 @@ public sealed partial class MainWindow : Window
         var args = StartupArgs.FromActivationMessage(raw);
         if (args.SelfCheck)
         {
-            _ = Task.Run(async () =>
+            // ★ 必须在 UI 线程跑（RenderTargetBitmap / ShowFromTray 都是 UI 对象，后台线程会抛跨线程异常）
+            DispatcherQueue.TryEnqueue(async () =>
             {
                 string text;
                 try
@@ -163,10 +168,9 @@ public sealed partial class MainWindow : Window
             _timer.Interval = TimeSpan.FromSeconds(20);
 
         _busy = true;
-        SetBusyUi(true);
         try
         {
-            var cred = CredentialVault.Load();
+            SetBusyUi(true);            var cred = CredentialVault.Load();
             if (cred is null || !cred.IsComplete)
             {
                 SetFooter("凭据未导入 —— 运行 pccard credential import 后点「刷新」", warn: true);
@@ -217,39 +221,7 @@ public sealed partial class MainWindow : Window
             }
 
             // ── 动作后置：按钮保持禁用，直到状态与期望一致（或超时）才解锁 ──
-            if (_pendingKind is ActionKind pk)
-            {
-                var now = DateTime.UtcNow;
-                var minDone = now >= _pendingMinUntil;
-                var satisfied = pk switch
-                {
-                    ActionKind.PowerOn => state.PowerOn == true ? true : state.PowerOn == false ? false : (bool?)null,
-                    ActionKind.PowerOff or ActionKind.ForcePowerOff
-                        => state.PowerOn == false ? true : state.PowerOn == true ? false : (bool?)null,
-                    _ => null, // 重启类：重启前后都是"开机"，云端状态信号不可靠 → 固定等待
-                };
-                var isRebootKind = pk is ActionKind.Reboot or ActionKind.ForceReboot;
-                var released = (isRebootKind && minDone)
-                            || (minDone && satisfied == true)
-                            || now >= _pendingDeadline;
-                if (released)
-                {
-                    if (satisfied == true)
-                        SetFooter($"「{pk.ToDisplayName()}」已确认完成 · {DateTime.Now:HH:mm:ss}", warn: false);
-                    else if (isRebootKind && minDone)
-                        SetFooter($"「{pk.ToDisplayName()}」已发送（重启类无云端状态可确认）· 按钮已解锁", warn: false);
-                    else
-                        SetFooter($"「{pk.ToDisplayName()}」已发送（状态未按时确认，按钮已解锁）", warn: true);
-                    _footerHoldUntil = DateTime.UtcNow.AddSeconds(30);
-                    _pendingKind = null;
-                }
-                else
-                {
-                    var left = (int)Math.Max(0, (_pendingDeadline - now).TotalSeconds);
-                    SetFooter($"已发送「{pk.ToDisplayName()}」指令 · 等待状态更新…（最长 {left}s）", warn: false);
-                    _footerHoldUntil = DateTime.UtcNow.AddSeconds(10);
-                }
-            }
+            ReleasePendingIfDue(state, quiet: false);
 
             UpdateStatusUi(dev, state, online, tunnel);
             LoadLogs();
@@ -266,9 +238,52 @@ public sealed partial class MainWindow : Window
         }
         finally
         {
+            // ★ 兜底释放：即使刷新因异常永远走不到成功路径，动作键也不能永久禁用
+            ReleasePendingIfDue(null, quiet: true);
             _busy = false;
             SetBusyUi(false);
             _firstRefreshDone = true;
+        }
+    }
+
+    /// <summary>
+    /// 动作后置的释放判定（幂等）。state 为 null（异常兜底路径）时只按截止时间强制释放；
+    /// quiet=true 且未到释放条件时不碰页脚（避免覆盖错误提示）。
+    /// </summary>
+    private void ReleasePendingIfDue(CardState? state, bool quiet)
+    {
+        if (_pendingKind is not ActionKind pk) return;
+
+        var now = DateTime.UtcNow;
+        var minDone = now >= _pendingMinUntil;
+        bool? satisfied = state is null ? null : pk switch
+        {
+            ActionKind.PowerOn => state.PowerOn == true ? true : state.PowerOn == false ? false : (bool?)null,
+            ActionKind.PowerOff or ActionKind.ForcePowerOff
+                => state.PowerOn == false ? true : state.PowerOn == true ? false : (bool?)null,
+            _ => null, // 重启类：重启前后都是"开机"，云端状态信号不可靠 → 固定等待
+        };
+        var isRebootKind = pk is ActionKind.Reboot or ActionKind.ForceReboot;
+        var released = (isRebootKind && minDone)
+                    || (minDone && satisfied == true)
+                    || now >= _pendingDeadline;
+
+        if (released)
+        {
+            if (satisfied == true)
+                SetFooter($"「{pk.ToDisplayName()}」已确认完成 · {DateTime.Now:HH:mm:ss}", warn: false);
+            else if (isRebootKind && minDone)
+                SetFooter($"「{pk.ToDisplayName()}」已发送（重启类无云端状态可确认）· 按钮已解锁", warn: false);
+            else
+                SetFooter($"「{pk.ToDisplayName()}」已发送（状态未按时确认，按钮已解锁）", warn: true);
+            _footerHoldUntil = DateTime.UtcNow.AddSeconds(30);
+            _pendingKind = null;
+        }
+        else if (!quiet)
+        {
+            var left = (int)Math.Max(0, (_pendingDeadline - now).TotalSeconds);
+            SetFooter($"已发送「{pk.ToDisplayName()}」指令 · 等待状态更新…（最长 {left}s）", warn: false);
+            _footerHoldUntil = DateTime.UtcNow.AddSeconds(10);
         }
     }
 
@@ -330,7 +345,9 @@ public sealed partial class MainWindow : Window
         // 主色填充由作用域资源固定（规范色 #017D7B），
         // 可用性只用 IsEnabled 表达：不可用 = 静音的禁用外观（规范 §3/§4）
         // ★ 动作后置期间（_pendingKind 非空）全部动作键一律禁用 —— 防连按
-        var gate = !_busy && _pendingKind is null;
+        // 刷新中（_busy）不再禁用动作键（只禁刷新键）—— 慢网络下按钮不该长期变灰；
+        // 防连按由「动作在途 _actionInFlight」+「动作后置 _pendingKind」承担。
+        var gate = !_actionInFlight && _pendingKind is null;
         PowerOnBtn.IsEnabled = _canOn && gate;
         PowerOffBtn.IsEnabled = _canOff && gate;
         RebootBtn.IsEnabled = _canReboot && gate;
@@ -340,13 +357,16 @@ public sealed partial class MainWindow : Window
 
     private bool ForceMode => ForceCheck.IsChecked == true;
 
-    private async void OnPowerOnClick(object sender, RoutedEventArgs e) => await DoActionAsync(ActionKind.PowerOn);
+    private void OnPowerOnClick(object sender, RoutedEventArgs e)
+        => SafeRun("开机", () => DoActionAsync(ActionKind.PowerOn));
 
-    private async void OnPowerOffClick(object sender, RoutedEventArgs e)
-        => await DoActionAsync(ForceMode ? ActionKind.ForcePowerOff : ActionKind.PowerOff);
+    private void OnPowerOffClick(object sender, RoutedEventArgs e)
+        => SafeRun(ForceMode ? "强制关机" : "关机",
+            () => DoActionAsync(ForceMode ? ActionKind.ForcePowerOff : ActionKind.PowerOff));
 
-    private async void OnRebootClick(object sender, RoutedEventArgs e)
-        => await DoActionAsync(ForceMode ? ActionKind.ForceReboot : ActionKind.Reboot);
+    private void OnRebootClick(object sender, RoutedEventArgs e)
+        => SafeRun(ForceMode ? "强制重启" : "重启",
+            () => DoActionAsync(ForceMode ? ActionKind.ForceReboot : ActionKind.Reboot));
 
     /// <summary>强制勾选切换时同步按钮文案（关机/重启 → 强制关机/强制重启）。</summary>
     private void OnForceChanged(object sender, RoutedEventArgs e)
@@ -356,6 +376,26 @@ public sealed partial class MainWindow : Window
     }
 
     private async Task DoActionAsync(ActionKind kind)
+    {
+        if (_actionInFlight)
+        {
+            SetFooter("上一个操作还在进行中，请稍候…", warn: false);
+            return;
+        }
+        _actionInFlight = true; // 点击瞬间生效：三个动作键同步置灰（防连按 piid1）
+        ApplyButtonStates();
+        try
+        {
+            await DoActionCoreAsync(kind);
+        }
+        finally
+        {
+            _actionInFlight = false;
+            ApplyButtonStates();
+        }
+    }
+
+    private async Task DoActionCoreAsync(ActionKind kind)
     {
         var dev = ConfigStore.GetSelectedDevice();
         if (dev is null)
@@ -385,7 +425,7 @@ public sealed partial class MainWindow : Window
                 DefaultButton = ContentDialogButton.Close,
                 XamlRoot = RootGrid.XamlRoot,
             };
-            if (await confirm.ShowAsync() != ContentDialogResult.Primary) return;
+            if (await ShowDialogAsync(confirm) != ContentDialogResult.Primary) return;
         }
 
         var cred = CredentialVault.Load();
@@ -418,6 +458,7 @@ public sealed partial class MainWindow : Window
                 _pendingKind = kind;
                 _pendingMinUntil = DateTime.UtcNow.AddSeconds(isReboot ? 60 : 12);
                 _pendingDeadline = DateTime.UtcNow.AddSeconds(isReboot ? 90 : 120);
+                ApplyButtonStates(); // 立刻置灰（等下一次刷新确认后释放）
             }
             catch (Exception ex)
             {
@@ -468,22 +509,28 @@ public sealed partial class MainWindow : Window
     private void ApplyTaskToggle(TaskItemVm vm)
     {
         if (_loadingTasks) return; // 回滚（写回 Enabled）时不要再触发写入
-        var (ok, msg) = WindowsTaskScheduler.CreateOrUpdate(vm.Model, AppPaths.CliExe, DateTime.Now);
-        if (ok)
+        SafeRun("任务开关", async () =>
         {
-            TaskStore.Upsert(vm.Model);
-            SetFooter($"任务「{vm.Model.Name}」已{(vm.Model.Enabled ? "启用" : "停用")}", warn: false);
-        }
-        else
-        {
-            SetFooter($"计划任务更新失败：{msg}", warn: true);
-            _loadingTasks = true;
-            vm.Enabled = !vm.Enabled; // 回滚开关（不再触发写入）
-            _loadingTasks = false;
-        }
+            // schtasks 同步版最长阻塞 10s —— 放后台线程，绝不压 UI
+            var (ok, msg) = await Task.Run(() => WindowsTaskScheduler.CreateOrUpdate(vm.Model, AppPaths.CliExe, DateTime.Now));
+            if (ok)
+            {
+                TaskStore.Upsert(vm.Model);
+                SetFooter($"任务「{vm.Model.Name}」已{(vm.Model.Enabled ? "启用" : "停用")}", warn: false);
+            }
+            else
+            {
+                SetFooter($"计划任务更新失败：{msg}", warn: true);
+                _loadingTasks = true;
+                vm.Enabled = !vm.Enabled; // 回滚开关（不再触发写入）
+                _loadingTasks = false;
+            }
+        });
     }
 
-    private async void OnAddTaskClick(object sender, RoutedEventArgs e)
+    private void OnAddTaskClick(object sender, RoutedEventArgs e) => SafeRun("新增任务", AddTaskAsync);
+
+    private async Task AddTaskAsync()
     {
         var nameBox = new TextBox { Header = "任务名", Text = "定时开机" };
         var actionBox = new ComboBox { Header = "动作", SelectedIndex = 0, MinWidth = 150 };
@@ -546,7 +593,7 @@ public sealed partial class MainWindow : Window
             DefaultButton = ContentDialogButton.Primary,
             XamlRoot = RootGrid.XamlRoot,
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        if (await ShowDialogAsync(dialog) != ContentDialogResult.Primary) return;
 
         var dev = ConfigStore.GetSelectedDevice();
         if (dev is null)
@@ -590,7 +637,8 @@ public sealed partial class MainWindow : Window
                 break;
         }
 
-        var (ok, msg) = WindowsTaskScheduler.CreateOrUpdate(task, AppPaths.CliExe, DateTime.Now);
+        // schtasks 同步版最长阻塞 10s —— 放后台线程，绝不压 UI
+        var (ok, msg) = await Task.Run(() => WindowsTaskScheduler.CreateOrUpdate(task, AppPaths.CliExe, DateTime.Now));
         if (!ok)
         {
             await ShowInfoAsync("创建失败", $"schtasks 返回：\n{msg}");
@@ -601,7 +649,9 @@ public sealed partial class MainWindow : Window
         SetFooter($"任务「{name}」已创建，下次触发 {TaskXmlBuilder.NextBoundary(task, DateTime.Now):MM-dd HH:mm}", warn: false);
     }
 
-    private async void OnTaskDelete(object sender, RoutedEventArgs e)
+    private void OnTaskDelete(object sender, RoutedEventArgs e) => SafeRun("删除任务", () => DeleteTaskAsync(sender));
+
+    private async Task DeleteTaskAsync(object sender)
     {
         if (sender is not FrameworkElement fe || fe.Tag is not string id) return;
         var t = TaskStore.Find(id);
@@ -616,9 +666,9 @@ public sealed partial class MainWindow : Window
             DefaultButton = ContentDialogButton.Close,
             XamlRoot = RootGrid.XamlRoot,
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        if (await ShowDialogAsync(dialog) != ContentDialogResult.Primary) return;
 
-        WindowsTaskScheduler.Delete(t);
+        await Task.Run(() => WindowsTaskScheduler.Delete(t));
         TaskStore.Remove(id);
         LoadTasks();
         SetFooter($"任务「{t.Name}」已删除", warn: false);
@@ -658,7 +708,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async void OnDeviceChanged(object sender, SelectionChangedEventArgs e)
+    private void OnDeviceChanged(object sender, SelectionChangedEventArgs e) => SafeRun("切换设备", async () =>
     {
         if (_loadingDevices) return;
         if (DeviceCombo.SelectedItem is DeviceRecord d)
@@ -669,7 +719,7 @@ public sealed partial class MainWindow : Window
             _pendingKind = null; // 换设备即放弃旧设备的等待态
             await RefreshAsync(manual: true);
         }
-    }
+    });
 
     private void LoadLogs()
     {
@@ -679,13 +729,29 @@ public sealed partial class MainWindow : Window
         LogsEmptyText.Visibility = _logs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private async void OnRefreshClick(object sender, RoutedEventArgs e) => await RefreshAsync(manual: true);
+    private void OnRefreshClick(object sender, RoutedEventArgs e) => SafeRun("刷新", () => RefreshAsync(manual: true));
 
     // ═══════════════════════ 设备设置（童锁 / 指示灯 / 通电自动开机）═══════════════════════
 
-    private async void OnSettingsClick(object sender, RoutedEventArgs e) => await ShowSettingsDialogAsync();
+    private void OnSettingsClick(object sender, RoutedEventArgs e) => SafeRun("设备设置", ShowSettingsDialogAsync);
 
     private async Task ShowSettingsDialogAsync()
+    {
+        // 先给反馈：查开关最坏 30s，期间齿轮不可重入（曾经的「双击齿轮 → 双对话框 → 崩溃」路径）
+        SettingsBtn.IsEnabled = false;
+        BusyRing.IsActive = true;
+        try
+        {
+            await ShowSettingsDialogCoreAsync();
+        }
+        finally
+        {
+            BusyRing.IsActive = false;
+            SettingsBtn.IsEnabled = true;
+        }
+    }
+
+    private async Task ShowSettingsDialogCoreAsync()
     {
         var dev = ConfigStore.GetSelectedDevice();
         if (dev is null)
@@ -805,7 +871,7 @@ public sealed partial class MainWindow : Window
             DefaultButton = ContentDialogButton.Close,
             XamlRoot = RootGrid.XamlRoot,
         };
-        await dlg.ShowAsync();
+        await ShowDialogAsync(dlg);
     }
 
     // ═══════════════════════ 自检（--selfcheck） ═══════════════════════
@@ -863,8 +929,15 @@ public sealed partial class MainWindow : Window
 
     private void SetBusyUi(bool busy)
     {
-        BusyRing.IsActive = busy;
-        RefreshBtn.IsEnabled = !busy;
+        try
+        {
+            BusyRing.IsActive = busy;
+            RefreshBtn.IsEnabled = !busy;
+        }
+        catch
+        {
+            // 控件已销毁等极端场景：尽力而为，绝不让它反过来崩掉页面
+        }
         ApplyButtonStates();
     }
 
@@ -881,6 +954,123 @@ public sealed partial class MainWindow : Window
     private static string FormatStamp(string? iso)
         => DateTimeOffset.TryParse(iso, out var t) ? t.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : (iso ?? "—");
 
+    // ═══════════════════════ 对话框串行器 / async void 安全网 / 崩溃复现 ═══════════════════════
+
+    /// <summary>
+    /// 所有 ContentDialog 的唯一入口：同一时刻只允许一个。
+    /// WinUI3 在「上一个对话框还在收尾时立刻弹下一个」会抛 E_UNEXPECTED(0x8000FFFF)，
+    /// 曾导致进程 stowed-exception 崩溃（WER 有据）—— 这里互斥 + 短延迟重试兜底。
+    /// </summary>
+    private async Task<ContentDialogResult> ShowDialogAsync(ContentDialog dlg)
+    {
+        if (!AppWindow.IsVisible)
+        {
+            Log.Info($"窗口不可见，跳过对话框「{dlg.Title}」");
+            return ContentDialogResult.None;
+        }
+
+        await _dialogGate.WaitAsync();
+        try
+        {
+            for (var attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    return await dlg.ShowAsync();
+                }
+                catch (COMException ex) when ((uint)ex.HResult == 0x8000FFFF && attempt < 5)
+                {
+                    // 上一个对话框可能仍在收尾 —— 稍候重试
+                    Log.Warn($"对话框「{dlg.Title}」重试 #{attempt + 1}：{ex.Message}");
+                    await Task.Delay(150);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"对话框「{dlg.Title}」显示失败", ex);
+                    return ContentDialogResult.None;
+                }
+            }
+        }
+        finally
+        {
+            _dialogGate.Release();
+        }
+    }
+
+    /// <summary>async void 统一安全网：任何未捕获异常 → 记日志 + 页脚提示，绝不让进程崩掉。</summary>
+    private async void SafeRun(string name, Func<Task> work)
+    {
+        try
+        {
+            await work();
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"「{name}」未处理异常", ex);
+            try
+            {
+                SetFooter($"{name}失败：{ex.Message}", warn: true);
+            }
+            catch
+            {
+                // 尽力而为
+            }
+        }
+    }
+
+    /// <summary>
+    /// --repro-dialog 崩溃复现：raw=true 用旧写法（ShowAsync 收尾期立即弹第二个）验证
+    /// E_UNEXPECTED 机制；raw=false 走 DialogHost，应稳定通过。
+    /// </summary>
+    public async Task<string> RunReproDialogAsync(bool raw)
+    {
+        ShowFromTray();
+        for (var i = 0; i < 100 && (RootGrid.XamlRoot is null || !AppWindow.IsVisible); i++)
+            await Task.Delay(50);
+        await Task.Delay(300); // 等首帧稳定
+
+        var a = new ContentDialog
+        {
+            Title = "复现 A", Content = new TextBlock { Text = "A" }, CloseButtonText = "X",
+            XamlRoot = RootGrid.XamlRoot,
+        };
+        var b = new ContentDialog
+        {
+            Title = "复现 B", Content = new TextBlock { Text = "B" }, CloseButtonText = "X",
+            XamlRoot = RootGrid.XamlRoot,
+        };
+
+        if (raw)
+        {
+            var op1 = a.ShowAsync();
+            await Task.Delay(120);
+            a.Hide(); // 触发关闭动画
+            try
+            {
+                var op2 = b.ShowAsync(); // 收尾期立刻弹第二个 → 预期 E_UNEXPECTED
+                await Task.Delay(300);
+                b.Hide();
+                await op1;
+                await op2;
+                return "REPRO-RAW-NO-EXCEPTION（本次未复现，窗口期未命中）";
+            }
+            catch (Exception ex)
+            {
+                return $"REPRO-RAW-CRASH-CONFIRMED: {ex.GetType().Name} 0x{ex.HResult:X8} {ex.Message}";
+            }
+        }
+
+        var ta = ShowDialogAsync(a);
+        await Task.Delay(120);
+        a.Hide();
+        var tb = ShowDialogAsync(b); // DialogHost：等 A 完全收尾后才弹 B
+        await Task.Delay(400);
+        b.Hide();
+        await ta;
+        await tb;
+        return "REPRO-HOST-PASS";
+    }
+
     private async Task ShowInfoAsync(string title, string message)
     {
         var dlg = new ContentDialog
@@ -890,7 +1080,7 @@ public sealed partial class MainWindow : Window
             CloseButtonText = "知道了",
             XamlRoot = RootGrid.XamlRoot,
         };
-        await dlg.ShowAsync();
+        await ShowDialogAsync(dlg);
     }
 
     [LibraryImport("shell32.dll")]
