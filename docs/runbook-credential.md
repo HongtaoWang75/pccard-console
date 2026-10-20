@@ -65,7 +65,15 @@ Get-Content -Raw -Encoding UTF8 credentials.json | ssh ali '"C:\Program Files\Pc
 
 ## 失效与续期
 
-- 症状：`doctor`/界面报 `AuthInvalid`（云返回 401）→ 重新走 P1/P2 导入即可
-- `passToken` 已随凭据保存：将来可做免扫码的静默续期（`GET /pass/serviceLogin?sid=xiaomiio`
-  携带 passToken → 跟随 location → 取新 serviceToken），目前未实现
+- 症状：`doctor`/界面报 `AuthInvalid`（云返回 401）；miotspec 可能表现为
+  `code=3 auth error` 而 `device_list` 仍可用 —— **这就是会话过期**，重导即可
+- **免扫码静默续期（已验证，2026-10-20）**：本机 `.auth-xiaomiio.json` 登录态可由
+  mijiaAPI 自动刷新 —— 直接跑 `acquire_qr.py`，会输出「刷新Token成功，无需登录」并
+  写出新凭据；只有登录态彻底失效时才需要手机扫码
+- ⚠️ 手写 passToken 续期（`serviceLoginAuth2`）**已被小米风控封**（`21315 无效的sid`；
+  社区共识：纯 HTTP 续期不可靠，需真实浏览器会话）→ 别走这条路
+- **自动保活**：`tools/keepalive/refresh-and-push.ps1` —— 静默刷新 → scp 到阿里云 →
+  `credential import --stdin`；`register-task.ps1` 注册 `PcCard\Keepalive`
+  （每 6 小时 09:17 起 + StartWhenAvailable，仅登录时运行）；日志
+  `%LOCALAPPDATA%\PcCardKeepalive\keepalive-YYYYMMDD.log`（保留 30 天）
 - 换密/异地登录风控会立即作废 serviceToken —— 属预期，重导即可
